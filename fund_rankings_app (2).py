@@ -122,7 +122,8 @@ WEIGHTS = {
 }
 
 SYSTEM_PROMPT = """You are a financial data expert on Indian mutual funds.
-Return ONLY a valid JSON array — no markdown, no code fences, no explanation.
+Return ONLY a valid JSON object with a single key "funds" containing an array — no markdown, no code fences, no explanation.
+Example format: {"funds": [{...}, {...}]}
 Each element must have exactly these keys:
   "Fund Name","AUM Cr.","TER","PE","PB",
   "Top 3 Holdings","Top 5 Holdings","Top 10 Holdings","Top 20 Holdings",
@@ -142,7 +143,7 @@ Rules (all values must be plain numbers, NOT strings):
 - For Hybrid Equity Savings funds: PE/PB/Holdings reflect equity portion only
 - Direct plans share same PE/PB/Holdings/Sharpe/Sortino/StDev as Regular plan of same scheme
 - Use null for any value you cannot confirm
-- Return ONLY the JSON array, nothing else"""
+- Return ONLY the JSON object, nothing else"""
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def load_funds(uploaded_file):
@@ -339,7 +340,8 @@ def build_prompt(fund_names):
         f"(equity and equity-savings hybrid funds).\n"
         f"Source: AMFI, Value Research, Morningstar India.\n\n"
         f"{numbered}\n\n"
-        f"Return a JSON array with exactly {len(fund_names)} objects in the same order as listed."
+        f'Return a JSON object with a single key "funds" containing an array of exactly '
+        f"{len(fund_names)} objects in the same order as listed."
     )
 
 def call_openai(client, fund_names, model, retries=3):
@@ -361,15 +363,16 @@ def call_openai(client, fund_names, model, retries=3):
             raw    = re.sub(r"^```[a-z]*\n?", "", raw)
             raw    = re.sub(r"\n?```$",        "", raw)
             parsed = json.loads(raw)
+            # Extract array from {"funds": [...]} or any dict with a list value
             if isinstance(parsed, dict):
                 for v in parsed.values():
                     if isinstance(v, list):
                         parsed = v
                         break
-            if isinstance(parsed, list):
+            if isinstance(parsed, list) and len(parsed) > 0:
                 return parsed
             return []
-        except Exception:
+        except Exception as ex:
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
     return []
@@ -639,7 +642,8 @@ if run_clicked and st.session_state.funds_df is not None:
             records = [{"Fund Name": n} for n in batch]
         else:
             st.session_state.logs.append(
-                f"[{ts()}]   ✅ {len(records)} records received")
+                f"[{ts()}]   ✅ {len(records)} records received  "
+                f"(non-null: {sum(1 for r in records if any(v is not None for k,v in r.items() if k != 'Fund Name'))})")
 
         # Always pin fund name to our source — never trust GPT's version
         for i, rec in enumerate(records):
